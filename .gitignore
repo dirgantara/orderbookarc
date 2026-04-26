@@ -1,0 +1,93 @@
+# ─── Credentials & Config ─────────────────────────────────────────────────────
+/orderbook
+/cms_orderbook
+/client_orderbook
+orderbook
+cms_orderbook
+client_orderbook
+
+# config.json holds real credentials — NEVER commit this
+config.json
+# .env files (jika dipakai untuk local dev)
+.env
+.env.*
+!.env.example
+
+# ─── Go ───────────────────────────────────────────────────────────────────────
+# Build output
+/bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.html
+coverage.out
+cpu.prof
+mem.prof
+
+# Dependency vendor directory (jika tidak pakai vendoring)
+vendor/
+
+# Go workspace
+go.work
+go.work.sum
+
+# ─── IDE & Editors ────────────────────────────────────────────────────────────
+# JetBrains (GoLand, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json.example
+
+# Vim / Neovim
+*.swp
+*.swo
+*~
+.netrwhist
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─── Docker ───────────────────────────────────────────────────────────────────
+.docker/
+# Local override compose files (boleh punya docker-compose.override.yml lokal)
+docker-compose.override.yml
+
+# ─── Logs & Runtime ───────────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+temp/
+
+# ─── Security — pastikan file ini tidak pernah masuk repo ─────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+secrets/
+credentials/
+
+.codex
