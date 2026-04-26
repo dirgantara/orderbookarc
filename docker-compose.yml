@@ -1,0 +1,128 @@
+services:
+  # =========================
+  # Backend (Orderbook Core)
+  # =========================
+  server:
+    build:
+      context: ./orderbook
+      dockerfile: Dockerfile
+    container_name: ob_server
+    volumes:
+      - ./orderbook:/app
+    environment:
+      SERVER_PORT: '8080'
+      ADMIN_PORT: '3001'
+      GIN_MODE: 'release'
+      WS_ENABLE_COMPRESSION: 'true'
+      POSTGRES_DSN: 'postgres://orderbook:password@postgres:5432/orderbook?sslmode=disable'
+      PG_MAX_CONNS: '50'
+      PG_MIN_CONNS: '5'
+      REDIS_ADDR: 'redis:6379'
+      REDIS_POOL_SIZE: '50'
+      KAFKA_BROKERS: 'kafka:9092'
+      KAFKA_TOPIC_PERSIST: 'ob.persist'
+      KAFKA_TOPIC_METRICS: 'ob.metrics'
+      KAFKA_REQUIRED_ACKS: '-1'
+      KAFKA_TOPIC_PARTITIONS: '6'
+      KAFKA_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_BATCH_TIMEOUT_MS: '5'
+      DEPENDENCY_STARTUP_MAX_ATTEMPTS: '15'
+      DEPENDENCY_STARTUP_RETRY_MS: '2000'
+      JWT_SECRET: 'vPnixVsw0tYRAyihyWhRyFVrzChfjuvYkek8SLQjtJzjI/fuQRUFC8ptkHbDfz31'
+      WEBHOOK_SECRET: 'tradingview-hmac-secret'
+      ALLOWED_SYMBOLS: 'BTCUSDT,ETHUSDT,BNBUSDT'
+      CMC_WEBHOOK_SECRET:
+      CG_WEBHOOK_SECRET:
+      MAX_PRICE_DEVIATION: '0.1'
+      PERSIST_WORKERS: '4'
+      METRICS_WORKERS: '2'
+    ports:
+      - '8080:8080'
+      - '3001:3001'
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+
+  # =========================
+  # Client (Frontend User)
+  # =========================
+  client_orderbook:
+    build:
+      context: ./client_orderbook
+      dockerfile: Dockerfile.dev
+    container_name: ob_client
+    volumes:
+      - ./client_orderbook:/app
+    environment:
+      NEXT_PUBLIC_API_URL: http://server:8080
+      NEXT_PUBLIC_API_CLIENT_URL: http://server:8080
+    ports:
+      - '3002:3000'
+    depends_on:
+      - server
+
+  # =========================
+  # CMS (Admin Panel)
+  # =========================
+  cms_orderbook:
+    build:
+      context: ./cms_orderbook
+      dockerfile: Dockerfile.dev
+    container_name: ob_cms
+    volumes:
+      - ./cms_orderbook:/app
+    environment:
+      NEXT_PUBLIC_API_URL: http://server:3001
+    ports:
+      - '3003:3000'
+    depends_on:
+      - server
+
+  # =========================
+  # Infra
+  # =========================
+  postgres:
+    image: postgres:16-alpine
+    container_name: ob_postgres
+    environment:
+      POSTGRES_USER: orderbook
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orderbook
+    ports:
+      - '5433:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: ob_redis
+    ports:
+      - '6379:6379'
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: ob_kafka
+    environment:
+      # KRaft mode — no Zookeeper needed
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Tuning for throughput
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+    ports:
+      - '9092:9092'
+
+volumes:
+  pg_data:
