@@ -1,0 +1,206 @@
+# ─── Architecture ─────────────────────────────────────────────────────────────
+# postgres  : shared primary storage (orderbook + trader tables)
+# redis     : cache + rate limiting
+# kafka     : durable event bus (KRaft, no Zookeeper)
+# server    : orderbook core (port 8080 public / 3001 admin)
+# trader    : mini client service (port 9000) — register, login(JWT), place order via HMAC
+
+services:
+
+  # =============================================================================
+  # Infrastructure
+  # =============================================================================
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ob_postgres
+    environment:
+      POSTGRES_USER: orderbook
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orderbook
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c wal_level=minimal
+      -c synchronous_commit=off
+      -c max_wal_senders=0
+    ports:
+      - '5433:5432'
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orderbook']
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: ob_redis
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: ob_kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+    ports:
+      - '9092:9092'
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/opt/kafka/bin/kafka-topics.sh',
+          '--bootstrap-server',
+          'localhost:9092',
+          '--list',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # =============================================================================
+  # Orderbook Core
+  # =============================================================================
+
+  server:
+    build:
+      context: ./orderbook
+      dockerfile: Dockerfile
+    container_name: ob_server
+    volumes:
+      - ./orderbook:/app
+      - go_cache:/root/go/pkg/mod
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: '8080'
+      ADMIN_PORT: '3001'
+      GIN_MODE: 'release'
+      WS_ENABLE_COMPRESSION: 'true'
+      SECRET_KEY: '12345678901234567890123456789012'
+      POSTGRES_DSN: 'postgres://orderbook:password@postgres:5432/orderbook?sslmode=disable'
+      PG_MAX_CONNS: '50'
+      PG_MIN_CONNS: '5'
+      REDIS_ADDR: 'redis:6379'
+      REDIS_POOL_SIZE: '50'
+      KAFKA_BROKERS: 'kafka:9092'
+      KAFKA_TOPIC_PERSIST: 'ob.persist'
+      KAFKA_TOPIC_METRICS: 'ob.metrics'
+      KAFKA_REQUIRED_ACKS: '-1'
+      KAFKA_TOPIC_PARTITIONS: '6'
+      KAFKA_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_BATCH_TIMEOUT_MS: '5'
+      DEPENDENCY_STARTUP_MAX_ATTEMPTS: '15'
+      DEPENDENCY_STARTUP_RETRY_MS: '2000'
+      JWT_SECRET: 'vPnixVsw0tYRAyihyWhRyFVrzChfjuvYkek8SLQjtJzjI/fuQRUFC8ptkHbDfz31'
+      WEBHOOK_SECRET: 'tradingview-hmac-secret'
+      ALLOWED_SYMBOLS: 'BTCUSDT,ETHUSDT,BNBUSDT'
+      CMC_WEBHOOK_SECRET:
+      CG_WEBHOOK_SECRET:
+      MAX_PRICE_DEVIATION: '0.1'
+      PERSIST_WORKERS: '4'
+      METRICS_WORKERS: '2'
+      MAIL_HOST: 'sandbox.smtp.mailtrap.io'
+      MAIL_PORT: '2525'
+      MAIL_USERNAME: '80959478cc210e'
+      MAIL_PASSWORD: 'fc7220f7e6f984'
+      MAIL_FROM_NAME: 'Orderbook'
+      MAIL_FROM_EMAIL: 'orderbook@example.com'
+      RESOURCE_PATH: '/app/internal/storage/template'
+    ports:
+      - '8080:8080'
+      - '3001:3001'
+    restart: unless-stopped
+
+  # =============================================================================
+  # Trader — Mini Client Service  (port 9000)
+  # =============================================================================
+
+  trader:
+    build:
+      context: ./trader
+      dockerfile: Dockerfile
+    container_name: ob_trader
+    depends_on:
+      postgres:
+        condition: service_healthy
+      server:
+        condition: service_started  # trader calls orderbook, so server must be up
+    environment:
+      SERVER_PORT: '9000'
+      DATABASE_URL: 'postgres://orderbook:password@postgres:5432/orderbook?sslmode=disable'
+      # Postgres env vars used by pg_isready inside entrypoint.sh
+      PGHOST: 'postgres'
+      PGUSER: 'orderbook'
+      JWT_SECRET: 'trader-jwt-secret-change-me-in-production'
+      ORDERBOOK_URL: 'http://server:8080'
+      # ⚠️  Fill these in after creating an API key via the orderbook admin panel.
+      # POST http://localhost:3001/api/v1/admin/api-keys  (admin endpoint)
+      # Then copy the returned key + secret below.
+      ORDERBOOK_API_KEY: '6c918ca4f79f29dc038f19a2ac077733'
+      ORDERBOOK_API_SECRET: 'C36rWW2n168PkZfuFAZ4vWnCVONmlwtIH6qwv8lQwrImE12+MFKIYOoQhn/Cuu3CW+hO9LJKIZJvCyrBxOzP9wc4zVpY4NFtuHvgpxuVkWv6IBTFZfaoWfLm1pk='
+    ports:
+      - '9000:9000'
+    restart: unless-stopped
+
+  # =============================================================================
+  # Observability
+  # =============================================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ob_prometheus
+    volumes:
+      - ./orderbook/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ob_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  pg_data:
+  kafka_data:
+  grafana_data:
+  go_cache:

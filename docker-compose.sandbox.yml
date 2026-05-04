@@ -1,0 +1,135 @@
+# ─── SANDBOX / DEVELOPMENT ENVIRONMENT ───────────────────────────────────────
+# Semua service di-prefix "sb_" agar tidak clash dengan production.
+# Port host di-offset +1000 dari production.
+#   Production public API : 8080  → Sandbox: 9080
+#   Production admin API  : 3001  → Sandbox: 4001
+#   Production postgres   : 5433  → Sandbox: 5434
+#   Production redis      : 6379  → Sandbox: 6380
+#   Production kafka      : 9092  → Sandbox: 9192
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres_sandbox:
+    image: postgres:16-alpine
+    container_name: sb_postgres
+    environment:
+      POSTGRES_USER: orderbook
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: orderbook_sandbox
+    command: >
+      postgres
+      -c max_connections=100
+      -c shared_buffers=128MB
+      -c effective_cache_size=256MB
+      -c wal_level=minimal
+      -c synchronous_commit=off
+      -c max_wal_senders=0
+    ports:
+      - '5434:5432'
+    volumes:
+      - pg_sandbox_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U orderbook']
+      interval: 5s
+      retries: 10
+
+  redis_sandbox:
+    image: redis:7-alpine
+    container_name: sb_redis
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - '6380:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+
+  kafka_sandbox:
+    image: apache/kafka:3.7.0
+    container_name: sb_kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka_sandbox:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka_sandbox:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_NUM_PARTITIONS: 2       # lebih kecil dari prod, sandbox tidak butuh throughput tinggi
+      KAFKA_LOG_RETENTION_HOURS: 24 # sandbox data tidak perlu disimpan lama
+    ports:
+      - '9192:9092'
+    volumes:
+      - kafka_sandbox_data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/opt/kafka/bin/kafka-topics.sh',
+          '--bootstrap-server',
+          'localhost:9092',
+          '--list',
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  server_sandbox:
+    build:
+      context: ./orderbook
+      dockerfile: Dockerfile
+    container_name: sb_server
+    volumes:
+      - ./orderbook:/app
+      - go_sandbox_cache:/root/go/pkg/mod
+    depends_on:
+      postgres_sandbox:
+        condition: service_healthy
+      redis_sandbox:
+        condition: service_healthy
+      kafka_sandbox:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: '9080'
+      ADMIN_PORT: '4001'
+      GIN_MODE: 'debug'             # debug mode di sandbox
+      WS_ENABLE_COMPRESSION: 'true'
+      POSTGRES_DSN: 'postgres://orderbook:password@postgres_sandbox:5432/orderbook_sandbox?sslmode=disable'
+      PG_MAX_CONNS: '20'            # lebih kecil dari prod
+      PG_MIN_CONNS: '2'
+      REDIS_ADDR: 'redis_sandbox:6379'
+      REDIS_POOL_SIZE: '20'
+      KAFKA_BROKERS: 'kafka_sandbox:9092'
+      KAFKA_TOPIC_PERSIST: 'sb.persist'
+      KAFKA_TOPIC_METRICS: 'sb.metrics'
+      KAFKA_REQUIRED_ACKS: '1'      # tidak perlu -1 (all acks) di sandbox
+      KAFKA_TOPIC_PARTITIONS: '2'
+      KAFKA_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_BATCH_TIMEOUT_MS: '5'
+      DEPENDENCY_STARTUP_MAX_ATTEMPTS: '15'
+      DEPENDENCY_STARTUP_RETRY_MS: '2000'
+      JWT_SECRET: 'SANDBOX-vPnixVsw0tYRAyihyWhRyFVrzChfjuvYkek8SLQjtJzjI'  # beda dari prod!
+      WEBHOOK_SECRET: 'sandbox-tradingview-hmac-secret'
+      ALLOWED_SYMBOLS: 'BTCUSDT,ETHUSDT,BNBUSDT'
+      MAX_PRICE_DEVIATION: '0.5'
+      PERSIST_WORKERS: '2'
+      METRICS_WORKERS: '1'
+      # Flag eksplisit untuk sandbox — bisa dipakai di middleware nanti
+      APP_ENV: 'sandbox'
+    ports:
+      - '9080:9080'   # public API sandbox
+      - '4001:4001'   # admin API sandbox
+    restart: unless-stopped
+
+volumes:
+  pg_sandbox_data:
+  kafka_sandbox_data:
+  go_sandbox_cache:
