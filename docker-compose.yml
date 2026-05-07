@@ -44,13 +44,16 @@ services:
       SMTP_FROM: 'Orderbook <dirgantoro.developer@gmail.com>'
       FRONTEND_CLIENT_URL: 'http://localhost:3002'
       FRONTEND_CMS_URL: 'http://localhost:3003'
-      MAIL_HOST: 'sandbox.smtp.mailtrap.io'
+      MAIL_HOST: 'smtp.gmail.com'
       MAIL_PORT: '587'
-      MAIL_USERNAME: '516c13a6fbbcf6'
-      MAIL_PASSWORD: 'f31251a7ff5f5a'
+      MAIL_USERNAME: 'dirgantoro.developer@gmail.com'
+      MAIL_PASSWORD: 'ijyq unrp wrow afmj'
       MAIL_FROM_NAME: 'Orderbook'
       MAIL_FROM_EMAIL: 'orderbook@example.com'
       RESOURCE_PATH: '/app/internal/storage/template'
+      CLOUDINARY_CLOUD_NAME: 'dfs7bou86'
+      CLOUDINARY_API_KEY: '426533771945585'
+      CLOUDINARY_API_SECRET: 'GSAQL5XRJLFWTO4PqV-gySGRUsc'
     ports:
       - '8080:8080'
       - '3001:3001'
@@ -70,7 +73,7 @@ services:
       - ./client_orderbook:/app
     environment:
       NEXT_PUBLIC_API_URL: http://server:8080
-      NEXT_PUBLIC_API_CLIENT_URL: http://server:8080/api/v1/
+      NEXT_PUBLIC_API_CLIENT_URL: http://server:8080/api/v1/clients/
     ports:
       - '3002:3000'
     depends_on:
@@ -87,7 +90,7 @@ services:
     volumes:
       - ./cms_orderbook:/app
     environment:
-      NEXT_PUBLIC_API_URL: http://server:3001
+      NEXT_PUBLIC_API_URL: http://server:3001/api/v1
     ports:
       - '3003:3000'
     depends_on:
@@ -104,7 +107,7 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: orderbook
     ports:
-      - '5433:5432'
+      - '5432:5432'
     volumes:
       - pg_data:/var/lib/postgresql/data
 
