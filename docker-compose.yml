@@ -62,7 +62,6 @@ services:
       - redis
       - kafka
 
-
   # =========================
   # Client (Frontend User)
   # =========================
@@ -96,10 +95,16 @@ services:
     container_name: ob_cms
     volumes:
       - ./cms_orderbook:/app
+      - /app/node_modules
     environment:
-      NEXT_PUBLIC_API_URL: http://server:3001/api/v1
+      NODE_ENV: development
+      VITE_API_URL: ${VITE_API_URL:-http://server:3001}
+      NEXT_PUBLIC_API_URL: http://server:3001
+      NEXT_PUBLIC_API_CLIENT_URL: http://server:3001/api/v1/
+      GO_API_URL: http://server:3001
+      JWT_SECRET: 'vPnixVsw0tYRAyihyWhRyFVrzChfjuvYkek8SLQjtJzjI/fuQRUFC8ptkHbDfz31'
     ports:
-      - '3003:3000'
+      - '3003:5173'
     depends_on:
       - server
 
