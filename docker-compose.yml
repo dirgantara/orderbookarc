@@ -61,6 +61,8 @@ services:
       - postgres
       - redis
       - kafka
+
+
   # =========================
   # Client (Frontend User)
   # =========================
@@ -71,11 +73,16 @@ services:
     container_name: ob_client
     volumes:
       - ./client_orderbook:/app
+      - /app/node_modules
     environment:
+      NODE_ENV: development
+      VITE_API_URL: ${VITE_API_URL:-http://server:8080}
       NEXT_PUBLIC_API_URL: http://server:8080
       NEXT_PUBLIC_API_CLIENT_URL: http://server:8080/api/v1/clients/
+      GO_API_URL: http://server:8080
+      JWT_SECRET: 'vPnixVsw0tYRAyihyWhRyFVrzChfjuvYkek8SLQjtJzjI/fuQRUFC8ptkHbDfz31'
     ports:
-      - '3002:3000'
+      - '3002:5173'
     depends_on:
       - server
 
